@@ -1,2 +1,2 @@
 test :
-	PYTHONPATH=~/experiments/html2text/:~/experiments/scrapy/ python scrapy_openkansas.py
+	PYTHONPATH=~/experiments/html2text/:~/experiments/scrapy/:~/experiments/reporter/ python scrapy_openkansas.py

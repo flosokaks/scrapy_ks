@@ -22,8 +22,15 @@ from scrapy.command import ScrapyCommand
 from scrapy.utils.project import inside_project, get_project_settings
 import scrapy.commands.runspider
 import scrapy.commands
-import pprint 
+import pprint
 import scrapy.http
+import os
+import os.path
+
+#from reporter import Reporter
+#my_reporter = Reporter()
+
+PAGECACHE="pages"
 
 # AJAXCRAWL_ENABLED
 # BOT_NAME
@@ -135,46 +142,68 @@ import scrapy.http
 
 class FileCache(object):
     def write(self, item, data, ext):
-        title = item['response'].url
-        for e in item['response'].css("h3 a::text") :
-            title = e.extract()
-        title = title.replace(" ","").replace("-","").replace("/","")
-        fn = "pages/{0}.{1}".format(title,ext)
+        title = str(item['path'])
+        fn = "{pages}/{title}.{ext}".format(title=title,ext=ext,pages=PAGECACHE)
         o = codecs.open(fn,"w","utf-8")
-        o.write(md)
+        o.write(data)
         o.close()
+
+from tidylib import tidy_document
 
 class HtmlCache(FileCache):
 
     # store the website as a python object
     def process_item(self, item, spider):
-        pprint.pprint(item['response'].__dict__)
-        self.write(item, data, ".html")
+        data = pprint.pformat(item['content'])
+        self.write(item, data, "html")
+
+        document, errors = tidy_document(data,
+                                         options={
+                                             'numeric-entities':1}
+        )
+
+        self.write(item, document, "html.tidy")
+        self.write(item, errors, "html.errors")
+
+#        my_reporter.read(html=data)
+#        data= my_reporter.report_news()
+#        self.write(item, data, "reporter.txt")
+
+#
         return item
 
 class PythonCache(FileCache):
 
     # store the website as a python object
     def process_item(self, item, spider):
-        data = pprint.pprint(item['response'].__dict__)
-        self.write(item, data, ".py")
+        data = pprint.pformat(item.__dict__)
+        self.write(item, data, "py")
         return item
 
 class MarkDownCache(FileCache):
 
     # convert the the html to markdown
     def process_item(self, item, spider):
-        response = item['response']
-        body = unicode(response.body, 'utf-8')
+        response = item['content']
+        #body = unicode(response, 'utf-8')
+        body = response
         data = html2text.html2text(body)
-        self.write(item, data, ".md")
+        self.write(item, data, "md")
         return item
 
 class Page(Item):
     response = Field()
-    def __init__(self, response):
+    url = Field()
+    title  = Field()
+    path  = Field()
+    content  = Field()
+    def __init__(self, title, url, content, path):
         super(Page,self).__init__()
-        self['response'] = response
+        self['title'] = title
+        self['path'] = path
+        self['url'] = url
+        self['content'] = content
+
 
 class OpenKansasSpider(Spider):
     name = 'openkansas'
@@ -182,9 +211,28 @@ class OpenKansasSpider(Spider):
     start_urls = ['http://openkansas.us']
 
     def parse(self, response):
-        ret = []      
-        p = Page(response=response )
-        ret.append(p)        
+        ret = []
+        title = "".join(response.xpath(
+            ".//span[@id='sites-page-title']/text()"
+        ).extract())
+#        print "Page Title", title
+        url = response.url
+        path  = url.replace(" ","").replace("/","_").replace(":","")
+        content = "".join(response.xpath(
+            ".//*[@id='sites-canvas-main-content']/table"
+        ).extract())
+        #print "Page Content", content
+
+        p = Page(
+            title=title,
+            path=path,
+            url=url,
+            content=content,
+        )
+        ret.append(p)
+
+
+        # spider the other local pages
         for sel in response.xpath('//ul/li/div'):
             title = sel.xpath('a/text()').extract()
             link = sel.xpath('a/@href').extract()
@@ -196,13 +244,27 @@ class OpenKansasSpider(Spider):
 
         return ret
 
+
 def main():
     settings = get_project_settings()
-    
-    settings.set('LOG_LEVEL',99)
+
+
+    if not os.path.exists(PAGECACHE):
+        os.mkdir(PAGECACHE)
+
+#    settings.set('LOG_LEVEL',99)
+#    settings.set('LOG_LEVEL',0)
+    settings.set('LOG_LEVEL',40)
+
+    settings.set('DOWNLOADER_MIDDLEWARES', {
+        'scrapy.contrib.downloadermiddleware.httpcache.HttpCacheMiddleware':
+        300,
+    })
 
     settings.set('ITEM_PIPELINES',{
         PythonCache : 300,
+        MarkDownCache : 300,
+        HtmlCache : 300,
     })
     #pprint.pprint(settings.__dict__)
 
