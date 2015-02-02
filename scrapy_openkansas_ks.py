@@ -12,7 +12,7 @@ When we crawl the page again we want to be able to diff/merge the information fr
 
 For things we dont know much about, we want to run searchs for them.
 """
-from scrapy import Spider, Item, Field
+from scrapy import Item, Field
 import html2text
 import codecs
 import scrapy
@@ -27,9 +27,14 @@ import scrapy.http
 import os
 import os.path
 from tidylib import tidy_document
-from scrapy.contrib.linkextractors.lxmlhtml import LxmlParserLinkExtractor
+from scrapy.contrib.linkextractors import LinkExtractor
+
 import lxml.etree as etree
 import tldextract
+import scrapy.contrib.spiders
+from scrapy import Spider
+from scrapy.contrib.spiders import Rule
+from scrapy.contrib.spiders import CrawlSpider
 
 #from reporter import Reporter
 #my_reporter = Reporter()
@@ -214,41 +219,112 @@ class Page(Item):
         self['domains'] = domains
 
 
-class OpenKansasSpider(Spider):
+
+class OpenKansasCrawlSpider(Spider):
     name = 'openkansas'
     base = 'http://openkansas.us/'
-    start_urls = ['http://openkansas.us']
+
+
+    start_urls = [
+        #'www.cs.du.edu',
+        #'www.k-state.edu',
+        #'www.linkedin.com',
+        #'www.meteor.com',
+        #'www.usabilityprofessionals.org',  http://uxpa.org/chapter/missouri-uxpa-kc-kansas-city
+        #'http://linuxsig.org', out of date
+        'http://aclug.neuralmatrix.org',
+        'http://acm.missouri.edu',
+        'http://adastralabs.wordpress.com',
+        'http://bslug.solve.net',
+        'http://cedarlug.org',
+        'http://cialug.org',
+#        'http://groups.google.com',
+        'http://hacroevolution.blogspot.com',
+        'http://kc.pm.org',
+        'http://kclug.org',
+        'http://kcohg.org',
+        'http://kcpug.org',
+        'http://lawrencecreates.com',
+        #'http://linux.neark.org',
+        'http://lrlug.org',
+        'http://luci.org',
+        'http://lug.boulder.co.us',
+        'http://makeict.org',
+        'http://nclug.org',
+        'http://nwclug.harpercollege.edu',
+        'http://olug.org',
+        #'http://plus.google.com',
+        'http://pplug.org',
+        'http://serl.cs.wichita.edu',
+        'http://silug.org',
+        'http://sluglinux.org',
+        'http://sluug.org',
+        'http://stclug.sluug.org',
+        'http://stllinux.org',
+        'http://uxpakc.org',
+#        'http://wclug.org', gone
+        'http://westernkansascommunitygroup.org',
+        'http://www.712innovations.com',
+        'http://www.adastralabs.org',
+        'http://www.amesfug.org',
+        'http://www.c3kc.org',
+        'http://www.k-slug.org',
+        'http://www.kansascity2.com',
+        'http://www.kansascityrobotics.org',
+        'http://www.kansascityusergroups.com',
+        'http://www.kclug.org',
+        'http://www.makekc.org',
+        'http://www.makerfairekc.com',
+        'http://www.meetup.com',
+        'http://www.ncklug.org',
+        'http://www.ou.edu',
+        'http://www.owasp.org',
+        'http://www.qclug.org',
+        'http://www.wulug.net',
+#        'barcamp.org',
+#        'k-state.edu',
+    ]
 
     def parse(self, response):
         ret = []
-        title = "".join(response.xpath(
-            ".//span[@id='sites-page-title']/text()"
-        ).extract())
-#        print "Page Title", title
         url = response.url
-        path  = url.replace(" ","").replace("/","_").replace(":","")
 
-        content = response.xpath(".//*[@id='sites-canvas-main-content']/table")
+        if "login.php" in url:
+            # dont go to login pages
+            return None
+
+        domres1  = tldextract.extract(url)
+        #sd = domres.subdomain
+        dm1 = domres1.domain
+        #tld = domres.suffix
+
+
+        path  = url.replace(
+            " ","").replace(
+                "/","_").replace(
+                    ":","").replace(
+                        ".","")
+        title = path
+        if response.body:
+            content = response.body_as_unicode()
+        else:
+            content = "NONE";
         links = []
         domains = []
-        #print "Page Content", content
 
-        l = LxmlParserLinkExtractor()
-        for e in content :
-            for x in e.xpath('//*//@href'):
-                y = x.extract()
-                links.append(y)
-                domres  = tldextract.extract(y)
-                sd = domres.subdomain
-                dm = domres.domain
-                tld = domres.suffix
-                if dm:
-                    #print domres
-                    d = "{0}.{1}.{2}".format(sd, dm, tld)
-                    if d not in domains:
-                        domains.append(d)
+        for x in response.xpath('//*//@href'):
+            y = x.extract()
+            links.append(y)
+            domres  = tldextract.extract(y)
+            sd = domres.subdomain
+            dm = domres.domain
+            tld = domres.suffix
+            if dm:
+                #print domres
+                d = "{0}.{1}.{2}".format(sd, dm, tld)
+                if d not in domains:
+                    domains.append(d)
 
-        content = "".join(content.extract())
         p = Page(
             title=title,
             path=path,
@@ -260,16 +336,29 @@ class OpenKansasSpider(Spider):
         ret.append(p)
 
 
+        l = LinkExtractor()
+        for x in l.extract_links(response):
+            domres  = tldextract.extract(x.url)
+            dm = domres.domain
+            if dm.lower() == dm1.lower():
+                print "extracted", x
 
-        # spider the other local pages
-        for sel in response.xpath('//ul/li/div'):
-            title = sel.xpath('a/text()').extract()
-            link = sel.xpath('a/@href').extract()
-            desc = sel.xpath('text()').extract()
-            if link:
-                l = self.base + link[0]
-                #print title, l, desc
-                ret.append(scrapy.http.Request(l))
+                if "login.php" in x.url:
+                    print "skipping login"
+                else:
+                    ret.append(scrapy.http.Request(x.url))
+            else:
+                print "Skip",domres, domres1, x
+                pass
+
+        # # spider the other local pages
+        # for sel in response.xpath('//*/@href'):
+        #     link = sel.extract()
+        #     desc = sel.xpath('text()').extract()
+        #     if link:
+        #         l = url + link[0]
+        #         print "LINK",l, desc
+        #         ret.append(scrapy.http.Request(l))
 
         return ret
 
@@ -277,17 +366,18 @@ class OpenKansasSpider(Spider):
 def main():
     settings = get_project_settings()
 
-
     if not os.path.exists(PAGECACHE):
         os.mkdir(PAGECACHE)
 
-#    settings.set('LOG_LEVEL',99)
-    settings.set('LOG_LEVEL',0)
-#    settings.set('LOG_LEVEL',40)
+    #settings.set('LOG_LEVEL',99)
+    #    settings.set('LOG_LEVEL',0)
+    #settings.set('LOG_LEVEL',60)
+    #settings.set('DEPTH_LIMIT',4)
 
     settings.set('DOWNLOADER_MIDDLEWARES', {
-        'scrapy.contrib.downloadermiddleware.httpcache.HttpCacheMiddleware':
-        300,
+       'scrapy.contrib.downloadermiddleware.httpcache.HttpCacheMiddleware': 300,
+       'scrapy.contrib.spidermiddleware.offsite.OffsiteMiddleware' : 300,
+       'scrapy.contrib.spidermiddleware.depth.DepthMiddleware' : 300,
     })
 
     settings.set('ITEM_PIPELINES',{
@@ -299,7 +389,7 @@ def main():
 
     cmd = scrapy.commands.runspider.Command()
     cmd.crawler_process = CrawlerProcess(settings)
-    cmd.crawler_process.crawl(OpenKansasSpider)
+    cmd.crawler_process.crawl(OpenKansasCrawlSpider)
     cmd.crawler_process.start()
 
 main()
